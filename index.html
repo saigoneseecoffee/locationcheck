@@ -2385,7 +2385,7 @@ function init(){
     if (e.target.closest('#btnShareTop') || e.target.closest('#btnShare')){ doShare(); return; }
     if (e.target.closest('#btnCopy')){ copyText(summaryText()); return; }
     if (e.target.closest('#btnDQ')){ $('#progress').hidden = false; $('#progress').scrollIntoView({block:'start', behavior:'smooth'}); return; }
-    if (e.target.closest('#ownSet')){ const a = +$('#ownAct').value; if (!(a>0)){ toast('Nhập doanh thu tháng trước'); $('#ownAct').focus(); return; } ST.settings.baseline = {addr: shortAddr(ST.D), R:ST.D.R, actual:a, gross:ST.H.gross, sig:calibSig(ST.P, ST.D, ST.S), t:Date.now()}; saveSettings(); renderLight(); renderGuide(); toast('Đã hiệu chỉnh — giờ phân tích địa điểm mới ở bán kính '+ST.D.R+' dặm'); return; }
+    if (e.target.closest('#ownSet')){ if (ST.D.osmFailed || ST.M.method==='none'){ toast('Thiếu dữ liệu quán đối thủ (OpenStreetMap lỗi) — bấm Phân tích lại rồi hãy hiệu chỉnh'); return; } const a = +$('#ownAct').value; if (!(a>0)){ toast('Nhập doanh thu tháng trước'); $('#ownAct').focus(); return; } ST.settings.baseline = {addr: shortAddr(ST.D), R:ST.D.R, actual:a, gross:ST.H.gross, sig:calibSig(ST.P, ST.D, ST.S), t:Date.now()}; saveSettings(); renderLight(); renderGuide(); toast('Đã hiệu chỉnh — giờ phân tích địa điểm mới ở bán kính '+ST.D.R+' dặm'); return; }
     if (e.target.closest('#cntStart')){
       if (ST.counter) { if (finishCounter()) toast('Đã lưu lần đếm'); return; }
       ST.counter = {key:siteKey(), n:0, start:Date.now(), iv:setInterval(counterTick, 1000)};
