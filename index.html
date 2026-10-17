@@ -1020,7 +1020,7 @@ async function fetchExtras(D){
       arcgisPoint(LAYERS.hpms(st), lat, lon, fields, '&distance=60&units=esriSRUnit_Meter'),
       arcgisPoint(LAYERS.hpms(st), lat, lon, fields, '&distance=400&units=esriSRUnit_Meter'),
     ]);
-    const best = rows => rows.filter(r=>r.aadt>0).sort((a,b)=>b.aadt-a.aadt)[0] || null;
+    const best = rows => rows.filter(r=>r.aadt>0 && !(+r.f_system<=2)).sort((a,b)=>b.aadt-a.aadt)[0] || null; /* skip interstates/freeways: cars there can't stop at a café */
     X.traffic = {front: best(near.rows), area: best(area.rows), nRows: area.rows.length, url: area.url, urlFront: near.url};
   })().catch(e=>{ X.trafficErr = e.message; }));
   jobs.push((async()=>{
