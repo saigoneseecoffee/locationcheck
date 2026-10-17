@@ -1204,7 +1204,7 @@ const PARAM_DEFS = {
   preopen:     {label:'Khai trương, hàng ban đầu, vốn lưu động', unit:'$', def:25000, step:1000, kind:'assume', grp:'cap'},
 };
 const WEIGHT_DEFS = {viab:25, afford:11, density:10, target:9, comp:12, access:9, traffic:7, gap:7, cost:10};
-const SCORE_NAMES = {viab:'Doanh thu so với hoà vốn', afford:'Sức mua', density:'Mật độ hộ', target:'Nhóm khách mục tiêu', comp:'Mức cạnh tranh', access:'Đi bộ & giao thông công cộng', traffic:'Lưu lượng xe qua lại', gap:'Ít quán Việt cạnh tranh', cost:'Tiền thuê có vừa sức'};
+const SCORE_NAMES = {viab:'Doanh thu so với hoà vốn', afford:'Sức mua', density:'Mật độ hộ', target:'Nhóm khách mục tiêu', comp:'Mức cạnh tranh', access:'Đi bộ & giao thông công cộng', traffic:'Lưu lượng xe qua lại', gap:'Cách xa quán Việt khác', cost:'Tiền thuê có vừa sức'};
 
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const lin = (v,a,b)=> v==null||!isFinite(v) ? null : clamp((v-a)/(b-a)*100,0,100);
