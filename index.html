@@ -1409,7 +1409,7 @@ function renderVerdict(){
   const reasons = [];
   if (f.beRatio!=null) reasons.push(f.beRatio>=1 ? `doanh thu ước tính bằng ${(f.beRatio*100).toFixed(0)}% điểm hoà vốn` : `doanh thu ước tính chỉ bằng ${(f.beRatio*100).toFixed(0)}% điểm hoà vốn`);
   const top = Object.entries(sc.items).filter(([k,v])=>v.v!=null).sort((a,b)=>b[1].v-a[1].v);
-  if (top.length){ reasons.push('mạnh nhất: '+SCORE_NAMES[top[0][0]].toLowerCase()); reasons.push('yếu nhất: '+SCORE_NAMES[top[top.length-1][0]].toLowerCase()); }
+  if (top.length){ reasons.push('mạnh nhất: '+lc1(SCORE_NAMES[top[0][0]])); reasons.push('yếu nhất: '+lc1(SCORE_NAMES[top[top.length-1][0]])); }
   const calibTxt = (M.calibOff ? ` <span class="neg">${esc(M.calibOff)}</span>` : '') + (M.method==='none' ? ' <span class="neg"><b>Không lấy được dữ liệu đối thủ từ OpenStreetMap nên không ước tính doanh thu.</b> Bấm Phân tích lại sau ít phút.</span>' : M.method==='A' ? ' Đã hiệu chỉnh theo doanh thu thật tiệm chuẩn.' : M.method==='B' ? ' <b>Kết quả sơ bộ:</b> doanh thu theo mức trung bình ngành × chỉ số vị trí — hiệu chỉnh bằng tiệm Weymouth (Cài đặt) để có kết luận.' : ' <b>Kết quả sơ bộ, độ tin cậy thấp:</b> doanh thu dùng tỷ lệ giả định.');
   REG.set('stamp', {id:'stamp', label:'Kết luận thẩm định', display: vd.t+' · '+(sc.total==null?'—':Math.round(sc.total))+'/100', kind: prelim?'assume':'calc', formula:'Điểm tổng = trung bình có trọng số của 8 yếu tố (tab Tổng quan). “Đáng xem kỹ”: điểm ≥ 65 và doanh thu ≥ 115% hoà vốn; “Cân nhắc”: điểm ≥ 45 và doanh thu ≥ 90% hoà vốn; còn lại “Chưa nên”.', note:'Ngưỡng do app đặt, không phải chuẩn ngành.'+(prelim?' Chưa hiệu chỉnh bằng tiệm thật nên chỉ là sơ bộ.':'')});
   $('#verdict').innerHTML = `
@@ -1424,6 +1424,7 @@ function renderVerdict(){
       ${!D.acs ? '<p class="xs neg" style="margin:6px 0 0">Chưa có dữ liệu ACS (thu nhập, tuổi) — thêm Census key để kết quả đầy đủ.</p>':''}
     </div>`;
 }
+function lc1(s){ return s.charAt(0).toLowerCase()+s.slice(1); }
 function shortAddr(D){ const a=D.q.addr||{}; const s=[a.house_number, a.road].filter(Boolean).join(' '); return (s ? s+', ' : '') + (D.q.town||D.q.label.split(',')[0]); }
 function renderKPIs(){
   const f = ST.M.scen[ST.scen], c = coreValues(); ST.core = c;
@@ -1767,7 +1768,9 @@ function renderMap(){
   if (!window.L){ el.innerHTML = '<p class="small muted" style="padding:16px">Không tải được thư viện bản đồ (Leaflet). Các phân tích khác vẫn đầy đủ.</p>'; return; }
   if (ST.map){ ST.map.remove(); ST.map = null; }
   const dark = matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.dataset.theme!=='light' || document.documentElement.dataset.theme==='dark';
-  const m = L.map(el, {zoomControl:true, attributionControl:true, tap:true}); ST.map = m;
+  const m = L.map(el, {zoomControl:true, attributionControl:true}); ST.map = m;
+  const bounds = L.latLng(D.q.lat, D.q.lon).toBounds(D.R*2*1609.34);
+  m.fitBounds(bounds, {padding:[10,10]});
   L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark?'dark_all':'light_all'}/{z}/{x}/{y}{r}.png`, {maxZoom:19, subdomains:'abcd', attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>'}).addTo(m);
   const cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
   const seq = [col('--seq1'),col('--seq2'),col('--seq3'),col('--seq4'),col('--seq5')];
@@ -1788,13 +1791,12 @@ function renderMap(){
     L.circleMarker([s.lat, s.lon], {radius:6, color:col('--ink'), weight:2, fillColor:col('--card'), fillOpacity:1}).addTo(m).bindPopup(`<b>${esc(s.name||'Ga')}</b><br>Ga / bến`);
   });
   L.marker([D.q.lat, D.q.lon], {icon: L.divIcon({className:'', html:'<div class="site-pin">S</div>', iconSize:[26,26], iconAnchor:[13,13]}), zIndexOffset:1000}).addTo(m).bindPopup('<b>Địa điểm phân tích</b><br>'+esc(D.q.label));
-  m.fitBounds(c.getBounds(), {padding:[10,10]});
   m.on('click', e => {
     const {lat, lng} = e.latlng;
     L.popup().setLatLng(e.latlng).setContent(`<div style="display:grid;gap:8px"><span>${lat.toFixed(5)}, ${lng.toFixed(5)}</span><button class="btn small" type="button" data-here="${lat},${lng}">Phân tích điểm này</button></div>`).openOn(m);
   });
   $('#mapLegend').innerHTML = `<span><span class="site-pin" style="width:16px;height:16px;font-size:9px;border-width:2px">S</span>Địa điểm</span><span><i class="sw" style="background:var(--s1)"></i>Đồ uống/ăn nhẹ</span><span><i class="sw" style="background:var(--s2)"></i>Ăn nhanh</span><span><i class="sw" style="background:var(--s3)"></i>Món Việt</span><span><i class="sw" style="background:var(--card);border-color:var(--ink)"></i>Ga/bến</span><span><i class="sw sq" style="background:${seq[4]}"></i>Mật độ hộ cao → <i class="sw sq" style="background:${seq[0]}"></i>thấp</span>`;
-  setTimeout(()=>m.invalidateSize(), 200);
+  setTimeout(()=>{ m.invalidateSize(); m.fitBounds(bounds, {padding:[10,10]}); }, 250);
 }
 
 /* ---------- settings ---------- */
