@@ -1273,9 +1273,9 @@ function prepare(D){
   if (D.cbp){ let w=0; D.zctas.forEach(z => { const r=D.cbp.byZip[z.zip]; z.emp = (r && r['00']) ? r['00'].emp : 0; w += z.emp*z.f; }); S.workers = w; }
   /* competitors; tag each with its ZCTA */
   D.comps.forEach(c => { if (c.zi===undefined){ c.zi = -1; for (let i=0;i<D.zctas.length;i++){ const z=D.zctas[i], b=z.bbox; if (c.x<b[0]||c.x>b[2]||c.y<b[1]||c.y>b[3]) continue; if (pip(c.x,c.y,z.rings)){ c.zi=i; break; } } } });
-  const inR = D.comps.filter(c=>!c.self && c.d<=D.R);
+  const inR = D.comps.filter(c=>!c.out && c.d<=D.R);
   S.compC = inR.filter(c=>c.pool==='C'); S.compL = inR.filter(c=>c.pool==='L'); S.compR = inR.filter(c=>c.pool==='R');
-  S.viets = D.comps.filter(c=>!c.self && !c.own && c.viet).sort((a,b)=>a.d-b.d);
+  S.viets = D.comps.filter(c=>!c.out && !c.own && c.viet).sort((a,b)=>a.d-b.d);
   S.ownNear = D.comps.find(c=>c.own) || null;
   S.nearestViet = S.viets[0] || null;
   S.chains = inR.filter(c=>c.chain && c.pool!=='R');
@@ -1297,7 +1297,7 @@ function phantomCompetitors(D, S){
   const out = {list:[], C:{osm:0, exp:0}, L:{osm:0, exp:0}, basis:null};
   if (D.osmFailed) return out;
   const pts = D.grid.pts, code = {C:'722515', L:'722513'};
-  const osmIn = p => D.comps.filter(c=>!c.self && c.pool===p && Math.hypot(c.x,c.y) <= D.grid.RO);
+  const osmIn = p => D.comps.filter(c=>!c.out && c.pool===p && Math.hypot(c.x,c.y) <= D.grid.RO);
   const tractDens = D.tracts.map(t => t.area>0 ? t.pop/t.area : 0);
   const centre = (filter) => { let x=0,y=0,w=0; for (const p of pts){ if (!filter(p)) continue; const ww = p.t>=0 ? tractDens[p.t]+1e-6 : 1e-6; x+=p.x*ww; y+=p.y*ww; w+=ww; } return w>0 ? {x:x/w, y:y/w} : null; };
   for (const p of ['C','L']){
@@ -1332,7 +1332,7 @@ function phantomCompetitors(D, S){
 function huff(D, S, P){
   const lam = P.lambda, dmin = 0.1, pc = P.poolC/100, pl = P.poolL/100, R = D.R;
   const mk = pool => {
-    const real = D.comps.filter(c=>!c.self && c.pool===pool).map(c=>({x:c.x, y:c.y, w: c.chain ? P.chainW : 1, real:true}));
+    const real = D.comps.filter(c=>!c.out && c.pool===pool).map(c=>({x:c.x, y:c.y, w: c.chain ? P.chainW : 1, real:true}));
     const ph = P.fillGap ? S.gap.list.filter(g=>g.pool===pool).map(g=>({x:g.x, y:g.y, w:g.w, real:false})) : [];
     return real.concat(ph);
   };
@@ -1520,9 +1520,10 @@ function scores(D, S, M, sc, weights){
   const near = S.stations.filter(s=>s.d<=0.5).length;
   const wt = (S.comm>0 && ref && ref.comm>0) ? ((S.walk+S.transit)/S.comm)/((ref.walk+ref.transit)/ref.comm) : null;
   const wi = D.x && D.x.walk && D.x.walk.NatWalkInd>0 ? D.x.walk.NatWalkInd : null;
-  const parts = []; if (true) parts.push([Math.min(100, near*60), 0.4]); if (wt!=null) parts.push([lin(wt,0.3,2), 0.3]); if (wi!=null) parts.push([lin(wi,5,17), 0.3]);
+  const bus = D.mbta && D.mbta.busStops!=null ? D.mbta.busStops/(Math.PI*D.R*D.R) : null;
+  const parts = []; parts.push([Math.min(100, near*60), bus!=null?0.3:0.4]); if (bus!=null) parts.push([lin(bus, 2, 40), 0.2]); if (wt!=null) parts.push([lin(wt,0.3,2), 0.3]); if (wi!=null) parts.push([lin(wi,5,17), 0.3]);
   const accV = (D.osmFailed && !D.mbta && wi==null) ? null : sum(parts, p=>p[0]*p[1])/sum(parts, p=>p[1]);
-  out.access = {v: accV, why:`${near} ga/bến trong 0.5 mi${wt!=null? ` · đi bộ/phương tiện công cộng đi làm bằng ${(wt*100).toFixed(0)}% mức bang`:''}${wi!=null? ` · chỉ số đi bộ EPA ${wi.toFixed(1)}/20`:''}`, rule:'ga: mỗi ga 60 điểm (tối đa 100, trọng số 40%); tỷ lệ đi bộ 0.3× → 0, 2× → 100 (30%); chỉ số EPA 5 → 0, 17 → 100 (30%)'};
+  out.access = {v: accV, why:`${near} ga tàu trong 0.5 mi${bus!=null?` · ${fmtInt(D.mbta.busStops)} trạm buýt trong bán kính`:''}${wt!=null? ` · đi bộ/phương tiện công cộng đi làm bằng ${(wt*100).toFixed(0)}% mức bang`:''}${wi!=null? ` · chỉ số đi bộ EPA ${wi.toFixed(1)}/20`:''}`, rule:'ga tàu: mỗi ga 60 điểm (tối đa 100, trọng số 30%, 40% nếu không có dữ liệu buýt); trạm buýt MBTA/dặm²: 2 → 0, 40 → 100 (20%); tỷ lệ đi bộ 0.3× → 0, 2× → 100 (30%); chỉ số EPA 5 → 0, 17 → 100 (30%)'};
   const tr = D.x && D.x.traffic && (D.x.traffic.front || D.x.traffic.area);
   out.traffic = {v: tr ? lin(tr.aadt, 5000, 25000) : null, why: tr ? `Đường gần nhất có số liệu: ${fmtInt(tr.aadt)} xe/ngày (${tr===D.x.traffic.front?'sát mặt tiền':'trong 400 m'})` : 'Không có số liệu lưu lượng xe', rule:'5,000 xe/ngày → 0, 25,000 → 100'};
   const dv = S.nearestViet ? S.nearestViet.d : (D.R+1);
@@ -1628,7 +1629,7 @@ async function analyze(input){
   $('#progress').hidden = false; $('#btnHideProg').hidden = true; resetSteps(); $('#welcome').hidden = true;
   try{
     const D = await runPipeline(input, ST.R, ST.settings.key, onStep);
-    ST.D = D; ST.S = prepare(D); ST.hSig=''; ST.rentAuto = null; ST.lastInput = input;
+    ST.D = D; markOut(D); ST.S = prepare(D); ST.hSig=''; ST.rentAuto = null; ST.lastInput = input;
     LS.set('smb.last', input.q ? {q:input.q, R:ST.R} : {lat:D.q.lat, lon:D.q.lon, label:D.q.label, R:ST.R});
     try{ const u = new URL(location.href); u.search = ''; if (input.q) u.searchParams.set('q', input.q); else u.searchParams.set('ll', D.q.lat.toFixed(5)+','+D.q.lon.toFixed(5)); u.searchParams.set('r', ST.R); history.replaceState(null, '', u.toString()); }catch(e){}
     $('#results').hidden = false;
@@ -1646,6 +1647,10 @@ async function analyze(input){
   }finally{ btn.disabled = false; btn.textContent = 'Phân tích'; }
 }
 
+/* café already operating at the address: the owner may be taking over its space */
+function siteOccupant(D){ return D.comps.filter(c=>!c.self && !c.own && c.pool!=='R' && c.d<0.03).sort((a,b)=>a.d-b.d)[0] || null; }
+function markOut(D){ const k = D.q.lat.toFixed(4)+','+D.q.lon.toFixed(4), rep = (ST.settings.replace||{})[k]; D.comps.forEach(c=>{ c.out = c.self || (rep && c.id===rep); }); }
+function toggleReplace(){ const D=ST.D, k=D.q.lat.toFixed(4)+','+D.q.lon.toFixed(4), o=siteOccupant(D); if (!o) return; ST.settings.replace = ST.settings.replace||{}; if (ST.settings.replace[k]) delete ST.settings.replace[k]; else ST.settings.replace[k]=o.id; saveSettings(); markOut(D); ST.S = prepare(D); ST.hSig=''; renderAll(true); }
 /* ---------- recompute (no network) ---------- */
 function recompute(){
   const D=ST.D, S=ST.S; if (!D) return;
@@ -1762,6 +1767,7 @@ function renderKnow(){
   if (ranked.length){ const [k,v] = ranked[0]; items.push(['good', `Mạnh nhất: ${lc1(SCORE_NAMES[k])} — ${lc1(v.why)}.`]); const [k2,v2] = ranked[ranked.length-1]; if (v2.v < 50) items.push(['bad', `Yếu nhất: ${lc1(SCORE_NAMES[k2])} — ${lc1(v2.why)}.`]); }
   if (M.method!=='A' && M.method!=='none') items.push(['warn', S.isOwnSite ? 'Nhập doanh thu thật của tiệm này ngay bên dưới để hiệu chỉnh mô hình.' : 'Kết quả sơ bộ: phân tích tiệm Weymouth và nhập doanh thu thật để hiệu chỉnh (Cài đặt → Tiệm mẫu).']);
   if (!D.acs) items.push(['warn', D.key ? 'Census không trả dữ liệu thu nhập/tuổi — mã có thể sai hoặc chưa bấm kích hoạt trong email. Kiểm tra trong Cài đặt.' : 'Thêm mã Census (Cài đặt) để có thu nhập, tuổi, số việc làm.']);
+  const occ = siteOccupant(D); if (occ && !S.isOwnSite) items.unshift(['warn', occ.out ? `Đã loại “${occ.name||'quán tại địa chỉ'}” khỏi đối thủ vì anh sẽ thuê lại mặt bằng này (đổi ở tab Đối thủ).` : `“${occ.name||'Một quán'}” đang mở đúng ở địa chỉ này và đang được tính là đối thủ cạnh tranh mạnh nhất. Nếu anh định thuê lại mặt bằng của quán này, bấm nút ở tab Đối thủ để loại nó ra.`]);
   if (f.txLaborHr > 15) items.push(['warn', `Mỗi nhân viên phải làm ${f.txLaborHr.toFixed(0)} hoá đơn/giờ — cao hơn mức 15 mà nhà cung cấp thiết bị gọi là “rất tốt”. Giờ cao điểm có thể quá tải; cân nhắc thêm người (lãi sẽ giảm).`]);
   $('#know').innerHTML = `<h3>Điều cần biết</h3><ul class="know-list">${items.slice(0,4).map(([t,s])=>`<li class="${t}"><span class="ki" aria-hidden="true">${t==='good'?'✓':t==='bad'?'✕':'!'}</span><span>${esc(s)}</span></li>`).join('')}</ul>`;
 }
@@ -1790,9 +1796,11 @@ function renderSite(){
       if (P.TOTAL_VAL) rows.push(['Giá trị thẩm định thuế', `${V('pVal','Giá trị thẩm định (tổng)', fmtUSD(P.TOTAL_VAL),'live',meta)}${P.BLDG_VAL?` · toà nhà ${V('pBldVal','Giá trị toà nhà', fmtUSD(P.BLDG_VAL),'live',meta)}`:''}`]);
       if (P.LS_PRICE>1000) rows.push(['Lần bán gần nhất', `${fmtUSD(P.LS_PRICE)}${P.LS_DATE?' · '+esc(String(P.LS_DATE).replace(/^(\d{4})(\d{2})(\d{2})$/,'$3/$2/$1')):''}`]);
       rows.push(['Chủ sở hữu', entity ? esc(P.OWNER1) : 'Cá nhân — xem hồ sơ thuế của town']);
+      const big = P.BLD_AREA>20000 || /^[01]/.test(String(P.USE_CODE||''));
+      if (big) rows.push(['', '<span class="small muted">Lô đất lớn hoặc có nhà ở: các giá trị trên là của cả lô, không dùng để tính thuế hay ngưỡng cải tạo cho một mặt bằng.</span>']);
       const tax = townTax(D);
-      if (tax && P.TOTAL_VAL && P.BLD_AREA){ const psf = P.TOTAL_VAL*tax.rate/1000/P.BLD_AREA; rows.push(['Thuế nhà đất ước tính', V('pTax','Thuế nhà đất ước tính trên mỗi ft²', '$'+psf.toFixed(2)+'/ft²/năm','calc',{formula:`${fmtUSD(P.TOTAL_VAL)} × $${tax.rate}/$1,000 (thuế thương mại ${tax.fy}) ÷ ${fmtInt(P.BLD_AREA)} ft². Đây là phần thuế trong phí NNN nếu chủ nhà chia theo diện tích.`, srcName:SRC[tax.src].name, url:SRC[tax.src].url, url2:P.url, note: P.USE_CODE && String(P.USE_CODE).startsWith('0') ? 'Lô đất hỗn hợp (có nhà ở) có thể chịu thuế suất khác — chỉ để tham khảo.' : ''})]); if (psf > ST.P.nnnPSF) rows.push(['', `<span class="neg small">Riêng thuế đã cao hơn phí NNN đang giả định ($${ST.P.nnnPSF}/ft² gồm thuế, bảo hiểm, phí khu chung). Hỏi chủ nhà số NNN thật và sửa ở thẻ Giả định.</span>`]); }
-      if (P.BLDG_VAL){ const t = P.BLDG_VAL*0.30; rows.push(['Ngưỡng cải tạo 30% (521 CMR)', V('p521','Ngưỡng 30% giá trị toà nhà', fmtUSD(t),'calc',srcMeta('cmr521',{formula:`30% × giá trị toà nhà ${fmtUSD(P.BLDG_VAL)} (MassGIS).`, note:'Chi phí cải tạo từ 30% “full and fair cash value” của toà nhà trở lên thì cả toà nhà phải đạt chuẩn tiếp cận người khuyết tật; dưới 30% nhưng từ $100,000 thì phải có lối vào và nhà vệ sinh tiếp cận. Cách xác định giá trị: xem 521 CMR 5.38 — giá trị thẩm định thuế chỉ để tham khảo.'}))]); }
+      if (!big && tax && P.TOTAL_VAL && P.BLD_AREA){ const psf = P.TOTAL_VAL*tax.rate/1000/P.BLD_AREA; rows.push(['Thuế nhà đất ước tính', V('pTax','Thuế nhà đất ước tính trên mỗi ft²', '$'+psf.toFixed(2)+'/ft²/năm','calc',{formula:`${fmtUSD(P.TOTAL_VAL)} × $${tax.rate}/$1,000 (thuế thương mại ${tax.fy}) ÷ ${fmtInt(P.BLD_AREA)} ft². Đây là phần thuế trong phí NNN nếu chủ nhà chia theo diện tích.`, srcName:SRC[tax.src].name, url:SRC[tax.src].url, url2:P.url, note: P.USE_CODE && String(P.USE_CODE).startsWith('0') ? 'Lô đất hỗn hợp (có nhà ở) có thể chịu thuế suất khác — chỉ để tham khảo.' : ''})]); if (psf > ST.P.nnnPSF) rows.push(['', `<span class="neg small">Riêng thuế đã cao hơn phí NNN đang giả định ($${ST.P.nnnPSF}/ft² gồm thuế, bảo hiểm, phí khu chung). Hỏi chủ nhà số NNN thật và sửa ở thẻ Giả định.</span>`]); }
+      if (!big && P.BLDG_VAL){ const t = P.BLDG_VAL*0.30; rows.push(['Ngưỡng cải tạo 30% (521 CMR)', V('p521','Ngưỡng 30% giá trị toà nhà', fmtUSD(t),'calc',srcMeta('cmr521',{formula:`30% × giá trị toà nhà ${fmtUSD(P.BLDG_VAL)} (MassGIS).`, note:'Chi phí cải tạo từ 30% “full and fair cash value” của toà nhà trở lên thì cả toà nhà phải đạt chuẩn tiếp cận người khuyết tật; dưới 30% nhưng từ $100,000 thì phải có lối vào và nhà vệ sinh tiếp cận. Cách xác định giá trị: xem 521 CMR 5.38 — giá trị thẩm định thuế chỉ để tham khảo.'}))]); }
     } else if (P && P.none) rows.push(['Lô đất (MassGIS)', 'Không thấy thửa đất tại toạ độ này']);
     else rows.push(['Lô đất (MassGIS)', '<span class="muted">Không tải được</span>']);
   }
@@ -1849,7 +1857,7 @@ function renderMap(){
   });
   L.circle([D.q.lat, D.q.lon], {radius:D.R*1609.34, color:col('--accent'), weight:2, fill:false}).addTo(m);
   if (ST.settings.baseline && !S.isOwnSite){ const ov = overlapWithBaseline(D, ST.settings); if (ov.frac>0) L.circle([BASELINE.lat, BASELINE.lon], {radius:(ov.R0||D.R)*1609.34, color:col('--seal'), weight:1.5, fill:false, dashArray:'4 4'}).addTo(m).bindPopup('Khu khách của tiệm Weymouth'); }
-  D.comps.filter(x=>!x.self && (x.pool!=='R' || x.viet)).forEach(x => {
+  D.comps.filter(x=>!x.out && (x.pool!=='R' || x.viet)).forEach(x => {
     L.circleMarker([x.lat,x.lon], {radius: x.viet?7:5, color:col('--card'), weight:2, fillColor: x.viet?col('--s3'):x.pool==='C'?col('--s1'):col('--s2'), fillOpacity:1}).addTo(m)
       .bindPopup(`<b>${esc(x.name||'(không tên)')}</b><br>${esc(x.type)}${x.viet?' · Món Việt':''}${x.chain?' · Chuỗi':''}${x.own?' · Tiệm của anh':''}<br>${fmtMi(x.d)}`);
   });
@@ -1921,6 +1929,8 @@ function renderComp(){
   const D=ST.D, S=ST.S, U=D.urls, H=ST.M.H, G=S.gap;
   const osm = {url:U.osm, srcName:SRC.osm.name, date:'truy vấn lúc '+new Date(D.t).toLocaleString('vi-VN')};
   $('#compLead').innerHTML = `Trong ${D.R} dặm quanh địa điểm, theo OpenStreetMap.${S.selfFound?` Đã loại “${esc(S.selfFound.name)}” vì đó là tiệm của anh.`:''}`;
+  const occ = siteOccupant(D);
+  if (occ && !S.isOwnSite) $('#compLead').innerHTML += `<div class="note ${occ.out?'':'warn'}" style="margin-top:8px"><b>“${esc(occ.name||'Quán không tên')}” đang ở đúng địa chỉ này</b> (${esc(occ.type)}, cách ${fmtMi(occ.d)}). ${occ.out ? 'Đang loại khỏi đối thủ — coi như anh thuê lại mặt bằng của quán này.' : 'Đang tính là đối thủ. Nếu anh định thuê lại chính mặt bằng này (quán cũ sẽ đóng), loại nó ra để kết quả đúng hơn.'}<div class="btn-row" style="margin-top:8px"><button type="button" class="btn small ${occ.out?'ghost':''}" id="btnReplace">${occ.out?'Tính lại là đối thủ':'Tôi sẽ thuê lại mặt bằng này'}</button></div></div>`;
   const per10k = n => S.pop>0 ? (n/S.pop*1e4).toFixed(1) : '—';
   const kp = (id,lab,val,sub,meta,kind='live') => `<div class="kpi"><div class="k-lab">${lab}</div><div class="k-val">${V(id,lab,val,kind,meta)}</div><div class="k-sub">${sub}</div></div>`;
   $('#compKpis').innerHTML =
@@ -1949,7 +1959,7 @@ function renderComp(){
   } else $('#cbpBox').innerHTML = `<p class="small muted">${D.key ? 'Không lấy được dữ liệu CBP.' : 'Cần mã Census.'}</p>`;
   const F = [['all','Tất cả'],['C','Đồ uống'],['L','Ăn nhanh'],['viet','Món Việt'],['chain','Chuỗi']];
   $('#compFilter').innerHTML = F.map(([k,l])=>`<button type="button" class="chip" data-f="${k}" aria-pressed="${ST.compFilter===k}">${l}</button>`).join('');
-  const seen = new Set(), list = D.comps.filter(c=>!c.self && ((c.d<=D.R && c.pool!=='R') || (c.viet && c.d<=D.R+1))).filter(c => ST.compFilter==='all' || (ST.compFilter==='viet'?c.viet: ST.compFilter==='chain'? c.chain : c.pool===ST.compFilter)).filter(c=>{ if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+  const seen = new Set(), list = D.comps.filter(c=>!c.out && ((c.d<=D.R && c.pool!=='R') || (c.viet && c.d<=D.R+1))).filter(c => ST.compFilter==='all' || (ST.compFilter==='viet'?c.viet: ST.compFilter==='chain'? c.chain : c.pool===ST.compFilter)).filter(c=>{ if (seen.has(c.id)) return false; seen.add(c.id); return true; });
   $('#compList').innerHTML = list.length ? list.slice(0,60).map(c=>`<div class="item"><span class="sw" style="background:${c.viet?'var(--s3)':c.pool==='C'?'var(--s1)':'var(--s2)'}"></span><div style="min-width:0"><div class="nm">${esc(c.name||'(không tên)')}</div><div class="meta">${c.own?'<span class="tag viet">Tiệm của anh</span>':''}${c.viet&&!c.own?'<span class="tag viet">Món Việt</span>':''}${c.chain?'<span class="tag chain">Chuỗi</span>':''}${esc(c.type)}${c.tags.cuisine?' · '+esc(c.tags.cuisine.replace(/_/g,' ').replace(/;/g,', ')):''}</div></div><a class="dist" href="https://www.openstreetmap.org/${c.id}" target="_blank" rel="noopener">${fmtMi(c.d)}</a></div>`).join('') + (list.length>60?`<p class="xs muted">… và ${list.length-60} quán khác.</p>`:'') : '<p class="small muted">Không có quán nào trong nhóm này.</p>';
   const g = S.genCounts, near = S.stations.slice(0,5);
   $('#genBox').innerHTML = `<div class="grid2">${Object.keys(GEN_LABEL).filter(k=>k!=='station').map(k=>`<div class="row" style="border:0;padding:4px 0"><div class="l">${GEN_LABEL[k]}</div><div class="r">${V('gen'+k, GEN_LABEL[k]+' trong bán kính', fmtInt(g[k]||0),'live',osm)}</div></div>`).join('')}</div>
@@ -2060,7 +2070,7 @@ function buildSWOT(){
   if (S.density!=null){ if (S.density>=3000) sw.S.push(`Dân cư dày: ${fmtInt(S.density)} hộ/dặm², ${fmtInt(S.hh)} hộ trong ${D.R} dặm.`); else if (S.density<800) sw.W.push(`Dân cư thưa: ${fmtInt(S.density)} hộ/dặm² (ngưỡng app: dưới 800).`); }
   const rail = S.stations.filter(s=>s.rail)[0];
   if (rail && rail.d<=0.3) sw.S.push(`Cách ga ${rail.name} ${fmtMi(rail.d)} (${rail.mode.toLowerCase()}).`);
-  else if (!rail && (D.mbta || !D.osmFailed)) sw.W.push(`Không có ga tàu trong ${D.R} dặm.`);
+  else if (!rail && (D.mbta || !D.osmFailed)){ const bs = D.mbta && D.mbta.busStops; if (bs>=30) sw.S.push(`${fmtInt(bs)} trạm xe buýt MBTA trong ${D.R} dặm (không có ga tàu).`); else sw.W.push(`Không có ga tàu trong ${D.R} dặm${bs?`, chỉ ${bs} trạm buýt`:''}.`); }
   const tr = X.traffic && (X.traffic.front || X.traffic.area);
   if (tr){ if (tr.aadt>=15000) sw.S.push(`Đường gần đó có ${fmtInt(tr.aadt)} xe/ngày (FHWA 2023) — dễ được nhìn thấy.`); else if (tr.aadt<5000) sw.W.push(`Lưu lượng xe thấp: ${fmtInt(tr.aadt)} xe/ngày trên đường có số đo gần nhất.`); }
   if (X.walk && X.walk.NatWalkInd>0){ const w=X.walk.NatWalkInd; if (w>15.25) sw.S.push(`Chỉ số đi bộ EPA ${w.toFixed(1)}/20 — nhóm đi bộ nhiều nhất.`); else if (w<=10.5) sw.W.push(`Chỉ số đi bộ EPA ${w.toFixed(1)}/20 — dưới trung bình, khách chủ yếu đến bằng xe.`); }
@@ -2104,7 +2114,7 @@ function summaryText(){
   L.push('');
   L.push(`Dân số ${fmtInt(S.pop)} · ${fmtInt(S.hh)} hộ · ${fmtInt(S.density)} hộ/dặm²${S.meanInc?` · thu nhập bình quân hộ ${fmtUSD(S.meanInc)}`:''}`);
   L.push(`Chi tiêu ăn ngoài của cư dân: ${fmtUSDk(S.fafh)}/năm · Đối thủ (OSM): ${S.compC.length} quán đồ uống, ${S.compL.length} quán ăn nhanh · quán Việt gần nhất ${S.nearestViet?fmtMi(S.nearestViet.d):'không có'}`);
-  L.push(`Doanh thu ước tính ${fmtUSD(f.S)}/tháng (khoảng ${fmtUSDk(M.scen.low.S)}–${fmtUSDk(M.scen.high.S)}) · lãi ${fmtUSD(f.profit)}/tháng · hoà vốn ${fmtUSD(f.be)}/tháng · thuê/doanh thu ${fmtPct(f.occPct)}`);
+  L.push(`Doanh thu ước tính (kịch bản ${SCEN_NAME[ST.scen]}) ${fmtUSD(f.S)}/tháng — thấp ${fmtUSDk(M.scen.low.S)} · vừa ${fmtUSDk(M.scen.base.S)} · cao ${fmtUSDk(M.scen.high.S)} · lãi ${fmtUSD(f.profit)}/tháng · hoà vốn ${fmtUSD(f.be)}/tháng · thuê/doanh thu ${fmtPct(f.occPct)}`);
   L.push(`Giá thuê: $${P.rentPSF.toFixed(2)}/ft²/năm (${ST.rentAuto?ST.rentAuto.label:'anh nhập'}) × ${fmtInt(P.sqft)} ft² · vốn ban đầu ${fmtUSDk(f.capex)} · vốn cần chuẩn bị ${f.cash?fmtUSDk(f.cash.peak):'—'}`);
   L.push(`Giả định chính: hoá đơn TB $${P.avgTicket.toFixed(2)}, giá vốn ${P.cogsPct}%, ${P.staff} nhân viên × ${P.hours} giờ × $${P.wage}/giờ, NNN $${P.nnnPSF}/ft², đơn qua app ${P.delivShare}% × ${P.delivComm}%, chi phí cố định khác $${P.otherFixed}/tháng.`);
   L.push('');
@@ -2370,6 +2380,7 @@ function init(){
     const sf = e.target.closest('#srcFilter [data-sf]'); if (sf){ ST.srcFilter=sf.dataset.sf; renderSources(); return; }
     const ld = e.target.closest('[data-load]'); if (ld){ const x=(ST.settings.saved||[]).find(s=>String(s.id)===ld.dataset.load); if (x){ closeSheet(); if (x.params && JSON.stringify(x.params)!==JSON.stringify(ST.settings.params)){ const old={...ST.settings.params}; ST.settings.params = {...x.params}; saveSettings(); toast('Đã dùng lại giả định lưu cùng địa điểm này', ()=>{ ST.settings.params=old; saveSettings(); if (ST.D) renderAll(false); }); } setR(x.R); $('#addr').value = x.q || x.full; analyze(x.q ? {q:x.q} : {lat:x.lat, lon:x.lon, label:x.full}); } return; }
     const dl = e.target.closest('[data-del]'); if (dl){ const all = ST.settings.saved||[], i = all.findIndex(s=>String(s.id)===dl.dataset.del); if (i<0) return; const [gone] = all.splice(i,1); saveSettings(); renderSavedCount(); renderSaved(); openSaved(); toast('Đã xoá '+gone.label, ()=>{ all.splice(i,0,gone); saveSettings(); renderSavedCount(); renderSaved(); if (!$('#scrim').hidden) openSaved(); }); return; }
+    if (e.target.closest('#btnReplace')){ toggleReplace(); return; }
     if (e.target.closest('#btnSaveTop')){ saveCurrent(); return; }
     if (e.target.closest('#btnShareTop') || e.target.closest('#btnShare')){ doShare(); return; }
     if (e.target.closest('#btnCopy')){ copyText(summaryText()); return; }
