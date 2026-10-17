@@ -175,6 +175,7 @@ tbody tr:last-child td{border-bottom:0}
 .sw{width:11px;height:11px;border-radius:50%;display:inline-block;border:2px solid var(--card)}
 .sw.sq{border-radius:3px}
 .leaflet-container{font:inherit;background:var(--card-2)}
+.tiles-dark{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
 .site-pin{width:26px;height:26px;border-radius:50%;background:var(--seal);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;font-family:var(--f-display)}
 .leaflet-popup-content{margin:10px 12px;font-size:13px;line-height:1.45}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--card);color:var(--ink)}
@@ -1772,7 +1773,7 @@ function renderMap(){
   const m = L.map(el, {zoomControl:true, attributionControl:true}); ST.map = m;
   const bounds = L.latLng(D.q.lat, D.q.lon).toBounds(D.R*2*1609.34);
   m.fitBounds(bounds, {padding:[10,10]});
-  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark?'dark_all':'light_all'}/{z}/{x}/{y}{r}.png`, {maxZoom:19, subdomains:'abcd', attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>'}).addTo(m);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, className: dark?'tiles-dark':'', attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(m);
   const cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
   const seq = [col('--seq1'),col('--seq2'),col('--seq3'),col('--seq4'),col('--seq5')];
   const dens = D.tracts.map(t => t.aland>0 ? t.hh/(t.aland/2589988.11) : 0);
