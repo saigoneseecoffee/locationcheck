@@ -2357,6 +2357,12 @@ function init(){
   updateKeyUI(); renderSaved(); renderGuide(); renderSavedCount();
   const sp = new URLSearchParams(location.search), last = LS.get('smb.last', null);
   if (sp.get('r')) { const rv=+sp.get('r'); setR(rv>0 ? Math.min(10, Math.max(0.1, rv)) : 1); } else setR(last && last.R ? last.R : 1);
+  /* optional site terms in the link: sqft, rent ($/ft²/yr) or rentmo ($/month base), nnn ($/ft²/yr), drinks=1|0 */
+  const pmap = {sqft:'sqft', rent:'rentPSF', nnn:'nnnPSF'}; let applied = 0;
+  for (const [k,pk] of Object.entries(pmap)){ const v = parseFloat(sp.get(k)); if (v>0 || (k==='nnn' && v===0)){ ST.settings.params[pk] = v; applied++; } }
+  const rmo = parseFloat(sp.get('rentmo')); if (rmo>0){ const sf = ST.settings.params.sqft || PARAM_DEFS.sqft.def; ST.settings.params.rentPSF = +(rmo*12/sf).toFixed(2); applied++; }
+  if (sp.get('drinks')==='1'){ ST.settings.params.drinksOnly = 1; applied++; } else if (sp.get('drinks')==='0'){ delete ST.settings.params.drinksOnly; applied++; }
+  if (applied){ saveSettings(); setTimeout(()=>toast('Đã dùng diện tích/giá thuê/mô hình từ link — sửa ở tab Tài chính'), 400); }
   if (sp.get('q')) { $('#addr').value = sp.get('q'); setTimeout(()=>analyze({q:sp.get('q')}), 50); }
   else if (sp.get('ll')) { const [la,lo]=sp.get('ll').split(',').map(Number); if (isFinite(la)&&isFinite(lo)) setTimeout(()=>analyze({lat:la, lon:lo}), 50); }
   else if (last && last.q) $('#addr').value = last.q;
