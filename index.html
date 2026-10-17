@@ -1171,6 +1171,8 @@ async function runPipeline(input, R, key, onStep){
    Model v2 — pure functions of fetched data D + parameters P.
    ============================================================ */
 const PARAM_DEFS = {
+  drinksOnly:  {label:'Chỉ bán đồ uống (không bánh mì, không nấu)', unit:'1=có', def:0, step:1, kind:'assume', note:'Bật thì doanh thu chỉ tính phần chi tiêu vào quán đồ uống/ăn nhẹ. Nhớ sửa hoá đơn TB và giá vốn theo đồ uống.', grp:'fin'},
+  drinkShare:  {label:'Tỷ lệ doanh thu đồ uống ở tiệm Weymouth', unit:'% DT', def:null, step:1, kind:'assume', note:'Lấy từ Square (Báo cáo → Doanh thu theo danh mục). Để trống: app dùng tỷ lệ mô hình tính cho Weymouth.', grp:'fin'},
   sqft:        {label:'Diện tích', unit:'ft²', def:1500, step:50, kind:'assume', note:'Tham khảo: fast casual trung bình 1,600–1,800 ft² (Toast).', src:'toastSize', grp:'fin'},
   rentPSF:     {label:'Giá thuê cơ bản', unit:'$/ft²/năm', def:null, step:0.25, kind:'auto', note:'Tự gợi ý theo khu vực — xem thẻ Tiền thuê.', grp:'fin'},
   nnnPSF:      {label:'Phí NNN (thuế nhà đất, bảo hiểm, phí khu chung)', unit:'$/ft²/năm', def:3, step:0.25, kind:'ref', note:'Người thuê trả thêm ngoài giá thuê. TenantBase: thường $2–4 (nguồn yếu). Hỏi môi giới số thật.', src:'tenantNNN', grp:'fin'},
@@ -1471,14 +1473,20 @@ function compute(D, S, P, settings, Hc){
     else if (base.sig !== calibSig(P, D, S)) calibOff = (String(base.sig).split('|').slice(0,7).join('|') === paramSig(P)) ? 'Nguồn dữ liệu khác lúc hiệu chỉnh (mã Census, số doanh nghiệp theo ZIP, hoặc bản cập nhật app) — phân tích lại tiệm mẫu để hiệu chỉnh lại.' : 'Anh đã đổi tham số mô hình sau khi hiệu chỉnh — phân tích lại tiệm mẫu để hiệu chỉnh lại.';
     else calib = {k: base.actual*12/base.gross, addr: base.addr};
   }
+  /* drinks-only: keep only the café/beverage pool; scale by the real drink share of the calibration store when known */
+  let G = H.gross, drinkAdj = null;
+  if (P.drinksOnly){
+    G = H.ourC;
+    if (calib && base.ourC>0 && P.drinkShare>0){ const modelShare = base.ourC/base.gross; drinkAdj = (P.drinkShare/100)/modelShare; G = H.ourC*drinkAdj; }
+  }
   const bench = benchmarkCafe(D.st, P);
   const B = H.index!=null ? {avg:bench.v, bench, index:H.index, annual: bench.v*H.index} : null;
   const laborRev = pnl(0, P).wages*12 / (ecOf(D.st).pay722515/ecOf(D.st).rcpt722515);
   let method, r, ann;
   if (D.osmFailed){ method='none'; r = {low:NaN, base:NaN, high:NaN}; ann = () => NaN; }
-  else if (calib){ method='A'; r = {low:calib.k*0.8, base:calib.k, high:calib.k*1.2}; ann = s => H.gross*r[s]; }
+  else if (calib){ method='A'; r = {low:calib.k*0.8, base:calib.k, high:calib.k*1.2}; ann = s => G*r[s]; }
   else if (B){ method='B'; r = {low:0.7, base:1, high:1.3}; ann = s => B.annual*r[s]; }
-  else { method='A0'; r = {low:P.realLow, base:P.realBase, high:P.realHigh}; ann = s => H.gross*r[s]; }
+  else { method='A0'; r = {low:P.realLow, base:P.realBase, high:P.realHigh}; ann = s => G*r[s]; }
   const scen = {};
   for (const s of ['low','base','high']){
     const annual = ann(s);
@@ -1492,7 +1500,7 @@ function compute(D, S, P, settings, Hc){
     scen[s] = f;
   }
   const maxRent = (pct, sc) => Math.max(0, (pct*scen[sc].S*12/P.sqft) - P.nnnPSF);
-  return {H, r, calib, calibOff, scen, maxRent, B, bench, laborRev, method};
+  return {H, G, drinkAdj, r, calib, calibOff, scen, maxRent, B, bench, laborRev, method};
 }
 function calibSig(P, D, S){ return paramSig(P)+'|'+(D.acs?'acs':'dec')+(D.cbp?'+cbp':'')+'|'+((S.gap&&S.gap.basis)||'-'); }
 function paramSig(P){ return [P.lambda,P.poolC,P.poolL,P.workers,P.officeShare,P.fillGap,P.chainW].join('|'); }
@@ -1683,14 +1691,14 @@ function coreValues(){
   r.fafh = V('fafh','Chi tiêu ăn ngoài của cư dân/năm', fmtUSDk(S.fafh), 'calc', {formula: acs ? `Mỗi khu: số hộ theo 9 nhóm thu nhập (ACS B19001) × chi tiêu ăn ngoài của nhóm đó (BLS 2024) × hệ số giá ${CPI.f2024.toFixed(4)}, rồi × phần diện tích trong vòng tròn.${S.approxTracts?` ${S.approxTracts} khu thiếu dữ liệu thu nhập nên dùng mức trung bình.`:''}` : `Số căn nhà × $${fmtInt(S.noKeyFafh)} (chi tiêu ăn ngoài TB ${S.ne?'vùng Đông Bắc':'toàn Mỹ'} 2024) × ${CPI.f2024.toFixed(4)}.`, srcName:acs?SRC.cexRange.name:(S.ne?SRC.cexNE.name:SRC.cexAll.name), url:acs?SRC.cexRange.url:(S.ne?SRC.cexNE.url:SRC.cexAll.url), urls: acs? U.acs : [U.tracts], uses:['cpi','hh']});
   r.poolC = V('poolC','Chi tiêu vào quán đồ uống/ăn nhẹ/năm', fmtUSDk(H.poolCtot), 'calc', srcMeta(ec.src,{formula:`Chi tiêu ăn ngoài × ${P.poolC}% (tỷ trọng doanh thu NAICS 722515 trong toàn ngành ăn uống ${ec.name}, Economic Census 2022).`, uses:['fafh']}));
   r.poolL = V('poolL','Chi tiêu vào quán ăn nhanh/năm', fmtUSDk(H.poolLtot), 'calc', srcMeta(ec.src,{formula:`Chi tiêu ăn ngoài × ${P.poolL}% (tỷ trọng NAICS 722513 trong ngành ăn uống ${ec.name}, Economic Census 2022).`, uses:['fafh']}));
-  r.gross = V('gross','Doanh thu lý thuyết (khách chia theo khoảng cách)', fmtUSDk(H.gross)+'/năm', 'calc', {formula:`Mô hình Huff: khách ở mỗi điểm trong vòng tròn chia chi tiêu cho tiệm mới và mọi quán cùng loại trong ${D.R+1} dặm, quán càng gần càng được nhiều (tỷ lệ 1/khoảng cách^${P.lambda}). ${fmtInt(H.nC)} quán đồ uống và ${fmtInt(H.nL)} quán ăn nhanh, gồm cả quán bù theo số Census.`, srcName:SRC.huff.name, url:SRC.huff.url, uses:['poolC','poolL']});
+  r.gross = V('gross', P.drinksOnly ? 'Doanh thu lý thuyết — chỉ phần đồ uống' : 'Doanh thu lý thuyết (khách chia theo khoảng cách)', fmtUSDk(M.G)+'/năm', 'calc', {formula:`${P.drinksOnly ? `Chỉ bán đồ uống: chỉ lấy phần chi tiêu vào quán đồ uống/ăn nhẹ (${fmtUSDk(H.ourC)}/năm), bỏ phần quán ăn nhanh (${fmtUSDk(H.ourL)})${M.drinkAdj?` × ${M.drinkAdj.toFixed(2)} (tỷ lệ đồ uống thật ở Weymouth ${P.drinkShare}% so với tỷ lệ mô hình)`:''}. `:''}Mô hình Huff: khách ở mỗi điểm trong vòng tròn chia chi tiêu cho tiệm mới và mọi quán cùng loại trong ${D.R+1} dặm, quán càng gần càng được nhiều (tỷ lệ 1/khoảng cách^${P.lambda}). ${fmtInt(H.nC)} quán đồ uống và ${fmtInt(H.nL)} quán ăn nhanh, gồm cả quán bù theo số Census.`, srcName:SRC.huff.name, url:SRC.huff.url, uses:['poolC','poolL']});
   r.real = V('real','Hệ số thực tế', (M.calib? M.calib.k : P.realBase).toFixed(3)+'×', M.calib?'calc':'assume', M.calib ? {formula:`Doanh thu thật tiệm mẫu (${fmtUSD(ST.settings.baseline.actual)}/tháng × 12) ÷ doanh thu lý thuyết mô hình tính cho tiệm mẫu (${fmtUSDk(ST.settings.baseline.gross)}/năm) = ${M.calib.k.toFixed(3)}.`} : {note:'Phần doanh thu lý thuyết thực sự thu được. Không có nguồn — hiệu chỉnh bằng tiệm Weymouth để thay bằng số thật.'});
   if (M.bench){
     const b = M.bench;
     r.bench = V('bench', b.how==='size' ? `Doanh thu điển hình một quán đồ uống cỡ ${b.cls.lab} ở MA` : 'Doanh thu trung bình một quán đồ uống ở Mỹ', fmtUSDk(b.v)+'/năm', 'calc', b.how==='size' ? srcMeta('cbpSize',{formula:`Quỹ lương TB một quán cỡ ${b.cls.lab} (CBP 2023: ${fmtUSD(b.cls.pay)} ÷ ${fmtInt(b.cls.est)} quán = ${fmtUSD(b.cls.pay/b.cls.est)}) ÷ tỷ lệ lương/doanh thu ngành ở MA ${(b.ratio*100).toFixed(1)}% (Economic Census 2022) × CPI 2023→${CPI.latestLabel} ${CPI.f2023.toFixed(3)}. Cỡ quán cố định ở nhóm 5–9 nhân viên (quán độc lập nhỏ như Saigonesee) — không phụ thuộc số nhân viên anh nhập ở thẻ Giả định.`, url2:SRC.ec22MA.url, note:`Giả định: tỷ lệ lương/doanh thu như nhau ở mọi cỡ quán; nhóm 5–9 nhân viên là giả định của app. Trung bình mọi quán đồ uống ở MA (gồm Dunkin’, Starbucks): ${fmtUSDk(b.mean)}/năm.`}) : srcMeta('ec22US',{formula:`$62,769,408K ÷ 78,110 quán (Economic Census 2022) × CPI 2022→${CPI.latestLabel} ${CPI.f2022.toFixed(3)}.`, note:'Trung bình gồm cả Starbucks, Dunkin’; quán độc lập nhỏ thường thấp hơn.'}));
   }
   if (H.index!=null) r.idx = V('idx','Vị trí so với quán đồ uống quanh đó', H.index.toFixed(2)+'×', 'calc', {formula:`Chi tiêu đồ uống tiệm mới hút được (mô hình Huff, tính tới ${D.R+1} dặm: ${fmtUSDk(H.ourCall)}) ÷ mức trung bình của ${H.nNear} quán đồ uống trong ${H.indexR} dặm (${fmtUSDk(H.meanCap)})${H.indexR>D.R?' — trong bán kính có dưới 3 quán nên app so với vùng rộng hơn':''}. Giới hạn 0.5–2 (giả định).${H.rawIndex>2||H.rawIndex<0.5?` Giá trị gốc ${H.rawIndex.toFixed(2)}.`:''}`, note:'>1: vị trí hút khách tốt hơn quán đồ uống trung bình quanh đó. Không tính phần bán bánh mì.', uses:['gross']});
-  const rv = M.method==='none' ? 'Không tính được vì thiếu dữ liệu đối thủ.' : M.method==='B' ? `${fmtUSDk(M.B.avg)}/năm × vị trí ${H.index.toFixed(2)} × kịch bản ${SCEN_NAME[ST.scen]} (${M.r[ST.scen]}) ÷ 12.` : `Doanh thu lý thuyết ${fmtUSDk(H.gross)}/năm × hệ số ${M.r[ST.scen].toFixed(3)} ÷ 12.`;
+  const rv = M.method==='none' ? 'Không tính được vì thiếu dữ liệu đối thủ.' : M.method==='B' ? `${fmtUSDk(M.B.avg)}/năm × vị trí ${H.index.toFixed(2)} × kịch bản ${SCEN_NAME[ST.scen]} (${M.r[ST.scen]}) ÷ 12.` : `Doanh thu lý thuyết ${fmtUSDk(M.G)}/năm × hệ số ${M.r[ST.scen].toFixed(3)} ÷ 12.`;
   r.rev = V('rev','Doanh thu ước tính/tháng', fmtUSD(f.S), 'calc', {formula: rv, note:'Phương pháp: '+METHOD_NAME[M.method]+'.'+(M.method==='B'?' Kịch bản thấp/cao = ×0.7/×1.3 (giả định).':M.method==='A'?' Kịch bản thấp/cao = hệ số ×0.8/×1.2 (giả định).':''), uses: M.method==='B'?['bench','idx']:['gross','real']});
   r.profit = V('profit','Lãi/tháng (trước khấu hao, thuế'+(P.mgr?'':', lương chủ')+')', fmtUSD(f.profit), 'calc', {formula:'Doanh thu − (giá vốn + lương + thuê + NNN + phí thẻ + hoa hồng app + chi phí khác). Chi tiết ở tab Tài chính.', uses:['rev']});
   r.be = V('be','Doanh thu hoà vốn/tháng', fmtUSD(f.be), 'calc', {formula:`Chi phí cố định ${fmtUSD(f.F)} ÷ (1 − tỷ lệ chi phí biến đổi ${fmtPct(f.v)}).`});
@@ -1972,11 +1980,12 @@ function topBrands(arr){ const m={}; arr.forEach(c=>{ const n=(c.tags.brand||c.n
 /* ---------- finance ---------- */
 function renderFin(){
   const D=ST.D, S=ST.S, M=ST.M, P=ST.P, f=M.scen[ST.scen], H=M.H, c=ST.core;
-  $('#funLead').innerHTML = M.method==='none' ? 'Thiếu dữ liệu đối thủ — chưa tính được.' : `Đang dùng: <b>${esc(METHOD_NAME[M.method])}</b>. Ba con số càng gần nhau, kết quả càng đáng tin.`;
+  const modeBtns = `<div class="chips" role="group" aria-label="Mô hình bán hàng" style="margin:0 0 8px">${[[0,'Đồ uống + bánh mì'],[1,'Chỉ đồ uống']].map(([v,l])=>`<button type="button" class="chip" data-mode="${v}" aria-pressed="${(P.drinksOnly?1:0)===v}">${l}</button>`).join('')}</div>`;
+  $('#funLead').innerHTML = modeBtns + (M.method==='none' ? 'Thiếu dữ liệu đối thủ — chưa tính được.' : `Đang dùng: <b>${esc(METHOD_NAME[M.method])}</b>. Ba con số càng gần nhau, kết quả càng đáng tin.`);
   const mrow = (lab, sub, v, used) => `<div class="row ${used?'used':''}"><div class="l">${lab}<small>${sub}</small></div><div class="r">${v}${used?' <span class="tag">đang dùng</span>':''}</div></div>`;
-  const aAnnual = H.gross*(M.calib?M.calib.k:P.realBase);
+  const aAnnual = M.G*(M.calib?M.calib.k:P.realBase);
   $('#methods').innerHTML = `<div class="rows">
-    ${mrow('Từ sức chi tiêu khu vực', `doanh thu lý thuyết ${c.gross} × hệ số ${c.real}`, V('annA','Doanh thu năm — tính từ sức chi tiêu', fmtUSDk(aAnnual)+'/năm','calc',{formula:`${fmtUSDk(H.gross)} × ${(M.calib?M.calib.k:P.realBase).toFixed(3)}.`, uses:['gross','real']}), M.method==='A'||M.method==='A0')}
+    ${mrow('Từ sức chi tiêu khu vực', `doanh thu lý thuyết ${c.gross} × hệ số ${c.real}`, V('annA','Doanh thu năm — tính từ sức chi tiêu', fmtUSDk(aAnnual)+'/năm','calc',{formula:`${fmtUSDk(M.G)} × ${(M.calib?M.calib.k:P.realBase).toFixed(3)}.`, uses:['gross','real']}), M.method==='A'||M.method==='A0')}
     ${M.B ? mrow('Từ doanh thu quán đồ uống điển hình', `${c.bench} × vị trí ${c.idx}`, V('annB','Doanh thu năm — tính từ quán điển hình', fmtUSDk(M.B.annual)+'/năm','calc',{formula:`${fmtUSDk(M.B.avg)} × ${H.index.toFixed(2)}.`, uses:['bench','idx']}), M.method==='B') : ''}
     ${mrow('Đối chiếu: theo quỹ lương dự kiến', `lương ${fmtUSDk(pnl(0,P).wages*12)}/năm ÷ tỷ lệ lương/doanh thu ngành`, V('annLab','Doanh thu tương ứng với quỹ lương', fmtUSDk(M.laborRev)+'/năm','calc',srcMeta(ecOf(D.st).src,{formula:`Lương ${P.hours} giờ × ${P.staff} người × $${P.wage} × 365 ngày ÷ ${(ecOf(D.st).pay722515/ecOf(D.st).rcpt722515*100).toFixed(1)}% (quỹ lương ÷ doanh thu của quán đồ uống ở ${ecOf(D.st).name}, Economic Census 2022).`, note:'Doanh thu mà một quán điển hình có với mức lương anh định trả — nếu khác xa hai số trên, xem lại số nhân viên.'})), false)}
   </div>
@@ -1986,7 +1995,7 @@ function renderFin(){
     ...(H.wrkSpend>0 ? [['+ Chi tiêu của người đi làm', V('wS2','Chi tiêu người đi làm', fmtUSDk(H.wrkSpend),'calc',{formula:'Xem tab Khách hàng.'}), '']] : []),
     ['Phần vào quán đồ uống/ăn nhẹ', c.poolC, `${P.poolC}% tổng chi tiêu`],
     ['Phần vào quán ăn nhanh', c.poolL, `${P.poolL}% tổng chi tiêu`],
-    ['Doanh thu lý thuyết của tiệm mới', c.gross, `đồ uống ${fmtPct(H.shareC)} · ăn nhanh ${fmtPct(H.shareL)} phần chi tiêu`],
+    [P.drinksOnly ? 'Doanh thu lý thuyết — chỉ đồ uống' : 'Doanh thu lý thuyết của tiệm mới', c.gross, P.drinksOnly ? `${fmtPct(H.shareC)} phần chi tiêu vào quán đồ uống; bỏ phần ăn nhanh` : `đồ uống ${fmtPct(H.shareC)} · ăn nhanh ${fmtPct(H.shareL)} phần chi tiêu`],
   ];
   $('#funnel').innerHTML = steps.map(([l,v,d])=>`<div class="fn"><div class="t"><span>${l}</span><b>${v}</b></div>${d?`<div class="d">${d}</div>`:''}</div>`).join('');
   const ln = (lab, id, v, sub, kind='calc', meta={}) => `<div class="row"><div class="l">${lab}${sub?`<small>${sub}</small>`:''}</div><div class="r">${V(id, lab, fmtUSD(v), kind, meta)}</div></div>`;
@@ -2051,7 +2060,7 @@ function renderRent(){
     ${tax ? `<p class="xs muted" style="margin:10px 0 0">Thuế nhà đất thương mại ${cap(tax.town)}: ${V('taxr','Thuế suất thương mại '+cap(tax.town), '$'+tax.rate+'/$1,000','ref',srcMeta(tax.src))} (${esc(tax.fy)}) — một phần của phí NNN.</p>`:''}
     <p class="xs muted" style="margin:10px 0 0">Đều là giá chào thuê, chưa trừ ưu đãi. Muốn nhập giá thật: sửa ô “Giá thuê cơ bản” ở thẻ Giả định.</p>`;
 }
-const FIN_FIELDS = ['sqft','rentPSF','nnnPSF','avgTicket','cogsPct','hours','staff','wage','payTax','mgr','delivShare','delivComm','cardPct','otherVar','otherFixed'];
+const FIN_FIELDS = ['drinksOnly','drinkShare','sqft','rentPSF','nnnPSF','avgTicket','cogsPct','hours','staff','wage','payTax','mgr','delivShare','delivComm','cardPct','otherVar','otherFixed'];
 const CAP_FIELDS = ['buildPSF','equip','depMonths','preopen','rampStart','rampMonths'];
 function fieldHTML(k){
   const d=PARAM_DEFS[k], v=ST.settings.params[k], kind=paramKind(k);
@@ -2110,6 +2119,7 @@ function summaryText(){
   L.push(`SOI MẶT BẰNG — ${D.q.label}`);
   L.push(`Bán kính ${D.R} dặm · ${new Date(D.t).toLocaleDateString('vi-VN')} · kịch bản ${SCEN_NAME[ST.scen]} · độ tin cậy ${ST.conf.t.toLowerCase()}`);
   L.push(`Kết luận${M.method!=='A'?' (SƠ BỘ)':''}: ${verdictOf(sc.total, f.beRatio).t} (${sc.total==null?'—':Math.round(sc.total)}/100). Ngưỡng do app đặt.`);
+  L.push(`Mô hình bán hàng: ${P.drinksOnly?'chỉ đồ uống':'đồ uống + bánh mì'}.`);
   L.push(`Phương pháp doanh thu: ${METHOD_NAME[M.method]}${M.calib?` (hệ số ${M.calib.k.toFixed(3)} từ ${M.calib.addr})`:''}.`);
   L.push('');
   L.push(`Dân số ${fmtInt(S.pop)} · ${fmtInt(S.hh)} hộ · ${fmtInt(S.density)} hộ/dặm²${S.meanInc?` · thu nhập bình quân hộ ${fmtUSD(S.meanInc)}`:''}`);
@@ -2381,11 +2391,12 @@ function init(){
     const ld = e.target.closest('[data-load]'); if (ld){ const x=(ST.settings.saved||[]).find(s=>String(s.id)===ld.dataset.load); if (x){ closeSheet(); if (x.params && JSON.stringify(x.params)!==JSON.stringify(ST.settings.params)){ const old={...ST.settings.params}; ST.settings.params = {...x.params}; saveSettings(); toast('Đã dùng lại giả định lưu cùng địa điểm này', ()=>{ ST.settings.params=old; saveSettings(); if (ST.D) renderAll(false); }); } setR(x.R); $('#addr').value = x.q || x.full; analyze(x.q ? {q:x.q} : {lat:x.lat, lon:x.lon, label:x.full}); } return; }
     const dl = e.target.closest('[data-del]'); if (dl){ const all = ST.settings.saved||[], i = all.findIndex(s=>String(s.id)===dl.dataset.del); if (i<0) return; const [gone] = all.splice(i,1); saveSettings(); renderSavedCount(); renderSaved(); openSaved(); toast('Đã xoá '+gone.label, ()=>{ all.splice(i,0,gone); saveSettings(); renderSavedCount(); renderSaved(); if (!$('#scrim').hidden) openSaved(); }); return; }
     if (e.target.closest('#btnReplace')){ toggleReplace(); return; }
+    const md = e.target.closest('[data-mode]'); if (md){ if (md.dataset.mode==='1') ST.settings.params.drinksOnly = 1; else delete ST.settings.params.drinksOnly; saveSettings(); const i=$('#p_drinksOnly'); if (i) i.value = ST.settings.params.drinksOnly||''; renderLight(); toast(md.dataset.mode==='1' ? 'Chỉ đồ uống — nhớ sửa hoá đơn TB và giá vốn theo đồ uống' : 'Đồ uống + bánh mì'); return; }
     if (e.target.closest('#btnSaveTop')){ saveCurrent(); return; }
     if (e.target.closest('#btnShareTop') || e.target.closest('#btnShare')){ doShare(); return; }
     if (e.target.closest('#btnCopy')){ copyText(summaryText()); return; }
     if (e.target.closest('#btnDQ')){ $('#progress').hidden = false; $('#progress').scrollIntoView({block:'start', behavior:'smooth'}); return; }
-    if (e.target.closest('#ownSet')){ if (ST.D.osmFailed || ST.M.method==='none'){ toast('Thiếu dữ liệu quán đối thủ (OpenStreetMap lỗi) — bấm Phân tích lại rồi hãy hiệu chỉnh'); return; } const a = +$('#ownAct').value; if (!(a>0)){ toast('Nhập doanh thu tháng trước'); $('#ownAct').focus(); return; } ST.settings.baseline = {addr: shortAddr(ST.D), R:ST.D.R, actual:a, gross:ST.H.gross, sig:calibSig(ST.P, ST.D, ST.S), t:Date.now()}; saveSettings(); renderLight(); renderGuide(); toast('Đã hiệu chỉnh — giờ phân tích địa điểm mới ở bán kính '+ST.D.R+' dặm'); return; }
+    if (e.target.closest('#ownSet')){ if (ST.D.osmFailed || ST.M.method==='none'){ toast('Thiếu dữ liệu quán đối thủ (OpenStreetMap lỗi) — bấm Phân tích lại rồi hãy hiệu chỉnh'); return; } const a = +$('#ownAct').value; if (!(a>0)){ toast('Nhập doanh thu tháng trước'); $('#ownAct').focus(); return; } ST.settings.baseline = {addr: shortAddr(ST.D), R:ST.D.R, actual:a, gross:ST.H.gross, sig:calibSig(ST.P, ST.D, ST.S), ourC:ST.H.ourC, t:Date.now()}; saveSettings(); renderLight(); renderGuide(); toast('Đã hiệu chỉnh — giờ phân tích địa điểm mới ở bán kính '+ST.D.R+' dặm'); return; }
     if (e.target.closest('#cntStart')){
       if (ST.counter) { if (finishCounter()) toast('Đã lưu lần đếm'); return; }
       ST.counter = {key:siteKey(), n:0, start:Date.now(), iv:setInterval(counterTick, 1000)};
